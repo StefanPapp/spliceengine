@@ -61,6 +61,9 @@ public class CheckTableIT extends SpliceUnitTest {
     private static final String EI = "EI";
     private static final String F = "F";
     private static final String FI = "FI";
+    private static final String G = "G";
+    private static final String GI = "GI";
+    private static final String H = "H";
 
     @ClassRule
     public static SpliceWatcher spliceClassWatcher = new SpliceWatcher(SCHEMA_NAME);
@@ -178,6 +181,27 @@ public class CheckTableIT extends SpliceUnitTest {
         ps = spliceClassWatcher.prepareStatement("insert into CHECKTABLEIT2.F select * from B");
         ps.execute();
         deleteFirstIndexRegion(spliceClassWatcher, conn, "CHECKTABLEIT2", F, FI);
+
+        new TableCreator(conn)
+                .withCreate("create table H(i int, j int, primary key(i))")
+                .withInsert("insert into H(i, j) values(?,?)")
+                .withRows(rows(
+                        row(1, 1),
+                        row(2, 2),
+                        row(3, 3)))
+                .create();
+
+        new TableCreator(conn)
+                .withCreate("create table G(i int, j int, primary key(i))")
+                .withInsert("insert into G(i, j) values(?,?)")
+                .withIndex("create unique index GI on G(j)")
+                .withRows(rows(
+                        row(1, 1),
+                        row(2, 2),
+                        row(3, 3)))
+                .create();
+
+
     }
 
     @AfterClass
@@ -403,6 +427,14 @@ public class CheckTableIT extends SpliceUnitTest {
         Assert.assertEquals(s, s, "No inconsistencies were found.");
     }
 
+    @Test
+    public void testForeignKeyUniqueIndex() throws Exception {
+        spliceClassWatcher.execute("alter table G add CONSTRAINT fc FOREIGN KEY(j) REFERENCES H(i) ON UPDATE NO ACTION ON DELETE restrict");
+        ResultSet rs = spliceClassWatcher.executeQuery(String.format("call syscs_util.check_table('%s', '%s', null, 2, '%s/check-%s2.out')", SCHEMA_NAME, G, getResourceDirectory(), G));
+        rs.next();
+        String s = rs.getString(1);
+        Assert.assertEquals(s, s, "No inconsistencies were found.");
+    }
     @Test
     public void negativeTests() throws Exception {
 
