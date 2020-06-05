@@ -112,7 +112,9 @@ public abstract class EmbedConnection implements EngineConnection
      */
     public static final SQLException NO_MEM =
         Util.generateCsSQLException(SQLState.LOGIN_FAILED, "java.lang.OutOfMemoryError");
-    
+
+	public static final ThreadLocal<Boolean> isHBaseJVM = new ThreadLocal<>();
+
     /**
      * Low memory state object for connection requests.
      */
@@ -217,7 +219,6 @@ public abstract class EmbedConnection implements EngineConnection
 		applicationConnection = rootConnection = this;
 		factory = driver;
 
-
 		tr = new TransactionResourceImpl(driver, url, info);
 
 		active = true;
@@ -281,7 +282,6 @@ public abstract class EmbedConnection implements EngineConnection
 			else if (!shutdown)
 			{
 				if (isTwoPhaseEncryptionBoot || isTwoPhaseUpgradeBoot) {
-					savedInfo = info;
 					info = removePhaseTwoProps((Properties)info.clone());
 				}
 
@@ -1787,7 +1787,7 @@ public abstract class EmbedConnection implements EngineConnection
     public final void setTypeMap(java.util.Map map) throws SQLException {
         checkIfClosed();
         if( map == null)
-            throw Util.generateCsSQLException(SQLState.INVALID_API_PARAMETER,map,"map",
+            throw Util.generateCsSQLException(SQLState.INVALID_API_PARAMETER,null,"map",
                                               "java.sql.Connection.setTypeMap");
         if(!(map.isEmpty()))
             throw Util.notImplemented();
@@ -2263,6 +2263,9 @@ public abstract class EmbedConnection implements EngineConnection
 		try {
 
 			info = filterProperties(info);
+
+			String s = (String)info.get("isHBaseJVM");
+			isHBaseJVM.set(Boolean.valueOf(s));
 
 			if (softAuthenticationBoot) {
 				info.setProperty(Attribute.SOFT_UPGRADE_NO_FEATURE_CHECK,

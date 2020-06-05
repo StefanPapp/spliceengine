@@ -106,7 +106,7 @@ public class SpliceSpark {
     }
 
     public static synchronized JavaSparkContext getContext() {
-        SparkSession s = getSession();
+        getSession();
         return ctx;
     }
 
@@ -114,7 +114,7 @@ public class SpliceSpark {
      * get a local Spark Context, it should never be used when implementing Splice operations or functions
      */
     public static synchronized JavaSparkContext getContextUnsafe() {
-        SparkSession s = getSessionUnsafe();
+        getSessionUnsafe();
         return ctx;
     }
 
@@ -150,7 +150,7 @@ public class SpliceSpark {
                     @Override public void distributedStart() throws IOException{ }
                     @Override public void markBootFinished() throws IOException{ }
                     @Override public boolean connectAsFirstTime(){ return false; }
-                },config,false).start();
+                },config,false, false).start();
 
                 EngineDriver engineDriver = EngineDriver.driver();
                 assert engineDriver!=null: "Not booted yet!";
@@ -244,9 +244,7 @@ public class SpliceSpark {
                 conf.set("spark.yarn.keytab", HConfiguration.unwrapDelegate().get("hbase.regionserver.keytab.file"));
             }
         }
-        String user = System.getProperty("splice.spark.yarn.principal");
-        String keytab = System.getProperty("splice.spark.yarn.keytab");
-
+        
         // set all spark props that start with "splice.".  overrides are set below.
         for (Object sysPropertyKey : System.getProperties().keySet()) {
             String spsPropertyName = (String) sysPropertyKey;
