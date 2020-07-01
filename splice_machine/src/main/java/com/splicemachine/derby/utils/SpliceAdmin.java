@@ -1383,6 +1383,8 @@ public class SpliceAdmin extends BaseAdminProcedures{
     }
 
     public static void SET_PURGE_DELETED_ROWS (String schemaName, String tableName, String enable) throws Exception{
+        schemaName = schemaName.toUpperCase();
+        tableName = tableName.toUpperCase();
         LanguageConnectionContext lcc = ConnectionUtil.getCurrentLCC();
         TransactionController tc  = lcc.getTransactionExecute();
         DataDictionary dd = lcc.getDataDictionary();
