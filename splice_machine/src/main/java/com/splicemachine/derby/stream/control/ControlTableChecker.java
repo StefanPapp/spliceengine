@@ -14,6 +14,7 @@
 
 package com.splicemachine.derby.stream.control;
 
+import com.google.common.collect.Lists;
 import com.splicemachine.db.iapi.types.DataValueDescriptor;
 import com.splicemachine.ddl.DDLMessage;
 import com.splicemachine.derby.stream.function.IndexTransformFunction;
@@ -41,7 +42,6 @@ import com.splicemachine.derby.utils.marshall.KeyHashDecoder;
 import com.splicemachine.si.impl.driver.SIDriver;
 import scala.Tuple2;
 
-import java.io.IOException;
 import java.util.*;
 
 /**
@@ -68,6 +68,7 @@ public class ControlTableChecker implements TableChecker {
     private long conglomerate;
     private DDLMessage.TentativeIndex tentativeIndex;
     private int[] baseColumnMap;
+    private boolean isSystemTable;
 
     @SuppressFBWarnings(value = "EI_EXPOSE_REP2",justification = "Intentional")
     public ControlTableChecker (String schemaName,
@@ -77,7 +78,8 @@ public class ControlTableChecker implements TableChecker {
                                 ExecRow tableKey,
                                 TxnView txn,
                                 boolean fix,
-                                int[] baseColumnMap) {
+                                int[] baseColumnMap,
+                                boolean isSystemTable) {
         this.schemaName = schemaName;
         this.tableName = tableName;
         this.baseTable = table;
@@ -87,6 +89,7 @@ public class ControlTableChecker implements TableChecker {
         this.txn = txn;
         this.fix = fix;
         this.baseColumnMap = baseColumnMap;
+        this.isSystemTable = isSystemTable;
     }
 
     @SuppressFBWarnings(value = "URF_UNREAD_FIELD",justification = "Intentional")
@@ -324,9 +327,15 @@ public class ControlTableChecker implements TableChecker {
     }
 
     private void fixMissingIndexes(Map<String, ExecRow> result) throws StandardException {
+        List<Integer> baseColumnMapList = Lists.newArrayList();
+        for (int i = 0; i < baseColumnMap.length; ++i) {
+            if (baseColumnMap[i] >= 0) {
+                baseColumnMapList.add(i+1);
+            }
+        }
         DataSet<ExecRow> dataSet = new ControlDataSet<>(result.values().iterator());
         PairDataSet dsToWrite = dataSet
-                .map(new IndexTransformFunction(tentativeIndex), null, false, true, "Prepare Index")
+                .map(new IndexTransformFunction(tentativeIndex, baseColumnMapList, isSystemTable), null, false, true, "Prepare Index")
                 .index(new KVPairFunction(), false, true, "Add missing indexes");
         DataSetWriter writer = dsToWrite.directWriteData()
                 .destConglomerate(tentativeIndex.getIndex().getConglomerate())
