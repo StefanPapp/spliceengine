@@ -261,8 +261,9 @@ public class PrestoS3FileSystem
         }
 
         ObjectMetadata metadata = getS3ObjectMetadata(path);
-
         if (metadata == null) {
+            // todo(martinrupp) i think on s3 we HAVE to do a listdir to check if sth is a directory. but, if we already do,
+            // we should cache this metadata, no?
             // check if this path is a directory
             Iterator<LocatedFileStatus> iterator = listPrefix(path);
             if (iterator.hasNext()) {

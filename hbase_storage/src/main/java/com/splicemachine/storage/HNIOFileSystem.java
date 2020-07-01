@@ -19,8 +19,11 @@ import com.splicemachine.access.api.FileInfo;
 import com.splicemachine.si.api.data.ExceptionFactory;
 import com.splicemachine.utils.SpliceLogUtils;
 import org.apache.commons.io.FileUtils;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.ContentSummary;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.LocatedFileStatus;
+import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.fs.permission.AclStatus;
 import org.apache.hadoop.fs.permission.FsAction;
 import org.apache.hadoop.hdfs.protocol.AclException;
@@ -91,9 +94,12 @@ public class HNIOFileSystem extends DistributedFileSystem{
         org.apache.hadoop.fs.Path p=new org.apache.hadoop.fs.Path(fullPath);
         return fs.exists(p);
     }
-
     @Override
-    public FileInfo getInfo(String filePath) throws IOException{
+    public FileInfo getInfo(String filePath) throws IOException {
+        return getInfo_ori(filePath);
+    }
+
+    public FileInfo getInfo_ori(String filePath) throws IOException{
         org.apache.hadoop.fs.Path f=new org.apache.hadoop.fs.Path(filePath);
         ContentSummary contentSummary;
         try{
@@ -104,6 +110,127 @@ public class HNIOFileSystem extends DistributedFileSystem{
 
         }
         return new HFileInfo(f,contentSummary);
+    }
+    public FileInfo getInfo_3(String filePath) throws IOException {
+
+        return new HFileInfo2( new org.apache.hadoop.fs.Path(filePath) );
+    }
+
+    public FileInfo getInfo_2(String filePath) throws IOException {
+        Configuration conf = com.splicemachine.access.HConfiguration.unwrapDelegate();
+        FileStatus fileInfo = null;
+        org.apache.hadoop.fs.FileSystem fs = org.apache.hadoop.fs.FileSystem.get(URI.create(filePath), conf);
+        boolean isEmpty = true;
+        try {
+            org.apache.hadoop.fs.Path p = new org.apache.hadoop.fs.Path(filePath);
+            fileInfo = fs.getFileStatus(p);
+
+            if(fileInfo.isDirectory())
+            {
+                int count = 1;
+                int size = 0;
+                // todo: calculate this on request
+                boolean full_info = false;
+                if( full_info ) {
+                    // don't do. this takes a LONG time on s3.
+                    RemoteIterator<LocatedFileStatus> it = fs.listFiles(p, true);
+                    while (it.hasNext()) {
+                        LocatedFileStatus fileStatus = it.next();
+                        size += fileStatus.getLen();
+                        count++;
+                    }
+                }
+//                FileStatus fileInfos[] = fs.listStatus(new org.apache.hadoop.fs.Path(filePath));
+//                return new MyFileInfo(true, filePath, true, fileInfos.length);
+                return new MyFileInfo(true, filePath, true, count, size);
+            }
+            else
+            {
+                return new MyFileInfo(true, filePath, false, 0, 0);
+            }
+        } catch (FileNotFoundException fnfe) {
+            return new MyFileInfo(false, filePath, false, 0, 0);
+        }
+    }
+
+    class MyFileInfo implements FileInfo {
+        String filename;
+        boolean directory;
+        int numFiles, size;
+        boolean bExists;
+        public MyFileInfo(boolean bExists, String filename, boolean directory, int numFiles, int size)
+        {
+            this.filename = filename;
+            this.directory = directory;
+            this.numFiles = numFiles;
+            this.bExists = bExists;
+            this.size = size;
+        }
+        @Override
+        public String fileName() {
+            return filename;
+        }
+
+        @Override
+        public String fullPath() {
+            return filename;
+        }
+
+        @Override
+        public boolean isDirectory() {
+            return directory;
+        }
+
+        @Override
+        public long fileCount() {
+            return numFiles;
+        }
+
+        // different only on replicated filesystems like HDFS
+        @Override
+        public long spaceConsumed() {
+            return size();
+        }
+
+        @Override
+        public long size() {
+            return size;
+        }
+
+        @Override
+        public boolean isEmptyDirectory() {
+            return isDirectory() && fileCount() == 0;
+        }
+
+        @Override
+        public boolean isReadable() {
+            return false;
+        }
+
+        @Override
+        public String getUser() {
+            return null;
+        }
+
+        @Override
+        public String getGroup() {
+            return null;
+        }
+
+        @Override
+        public boolean isWritable() {
+            return false;
+        }
+
+        @Override
+        public String toSummary() {
+            return null;
+        }
+
+        @Override
+        public boolean exists() {
+            return bExists;
+        }
     }
 
     public FileSystem getFileSystem(URI uri){
@@ -228,7 +355,7 @@ public class HNIOFileSystem extends DistributedFileSystem{
                 fs.access(path,FsAction.READ);
                 readable= true;
             }catch(IOException ioe){
-               readable = false;
+                readable = false;
             }
             boolean writable;
             try{
@@ -254,6 +381,11 @@ public class HNIOFileSystem extends DistributedFileSystem{
         @Override
         public boolean isDirectory(){
             return isDir;
+        }
+
+        @Override
+        public boolean isEmptyDirectory() {
+            return isDirectory() && fileCount() == 0;
         }
 
         @Override
@@ -311,6 +443,125 @@ public class HNIOFileSystem extends DistributedFileSystem{
             }catch(IOException e){
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+
+    private class HFileInfo2 implements FileInfo{
+        private org.apache.hadoop.fs.Path path;
+        FileStatus fileStatus;
+        private ContentSummary contentSummary = null; // calculate on demand
+
+        public HFileInfo2(org.apache.hadoop.fs.Path path) throws IOException{
+            this.path=path;
+            try {
+                this.fileStatus = fs.getFileStatus(path);
+            } catch( FileNotFoundException e )
+            {
+                this.fileStatus = null;
+            }
+        }
+
+        @Override
+        public String fileName(){
+            return path.getName();
+        }
+
+        @Override
+        public String fullPath(){
+            return path.toString();
+        }
+
+        @Override
+        public boolean isDirectory(){
+            return fileStatus != null && fileStatus.isDirectory();
+        }
+
+        // note this is expensive for deeply nested directories. avoid calling fileCount, spaceConsumed and size
+        private void calcContentSummary() {
+            if( contentSummary != null ) return;
+            try {
+                contentSummary = fs.getContentSummary(path);
+            } catch (IOException ioe) {
+                LOG.error("Unexpected error getting content summary. We ignore it for now, but you should probably check it out:", ioe);
+                contentSummary = new ContentSummary(0L, 0L, 0L);
+            }
+        }
+
+        @Override
+        public long fileCount(){
+            if( fileStatus == null ) return 0;
+            calcContentSummary();
+            return contentSummary.getFileCount();
+        }
+
+        @Override
+        public boolean isEmptyDirectory() {
+            if( fileStatus == null ) return false;
+            if( !isDirectory() ) return false;
+            if( contentSummary != null ) return contentSummary.getFileCount() == 0;
+//            fs.listFiles( false)
+            try {
+                for (FileStatus s : fs.listStatus(path)) {
+                    if (s.getPath().getName().equals("_SUCCESS")) continue;
+                    return false;
+                }
+                return true;
+            } catch( Exception e ) {
+                // this shouldn't happen, as we already check if it exists.
+                return false;
+            }
+        }
+
+        @Override
+        public long spaceConsumed(){
+            if( fileStatus == null ) return 0;
+            calcContentSummary();
+            return contentSummary.getSpaceConsumed();
+        }
+
+        @Override
+        public long size(){
+            if( fileStatus == null ) return 0;
+            calcContentSummary();
+            return contentSummary.getLength();
+        }
+
+        @Override
+        public boolean isReadable(){
+            if( fileStatus == null ) return false;
+            return fileStatus.getPermission().getUserAction().implies(FsAction.READ);
+        }
+
+        @Override
+        public String getUser(){
+            if( fileStatus == null ) return "";
+            return fileStatus.getOwner();
+        }
+
+        @Override
+        public String getGroup(){
+            if( fileStatus == null ) return "";
+            return fileStatus.getGroup();
+        }
+
+        @Override
+        public boolean isWritable(){
+            if( fileStatus == null ) return false;
+            return fileStatus.getPermission().getUserAction().implies(FsAction.WRITE);
+        }
+
+        @Override
+        public String toSummary() {
+            if( fileStatus == null ) return "file not found " + fullPath();
+            StringBuilder sb = new StringBuilder();
+            sb.append(this.isDirectory() ? "Directory = " : "File = ").append(fullPath());
+            return sb.toString();
+        }
+
+        @Override
+        public boolean exists(){
+            return fileStatus != null;
         }
     }
 }

@@ -21,20 +21,10 @@ import com.splicemachine.access.api.FileInfo;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URI;
-import java.nio.channels.AsynchronousFileChannel;
-import java.nio.channels.FileChannel;
-import java.nio.channels.SeekableByteChannel;
 import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.file.attribute.FileAttribute;
-import java.nio.file.attribute.FileAttributeView;
 import java.nio.file.spi.FileSystemProvider;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ExecutorService;
 import java.util.regex.Pattern;
 
 /**
@@ -177,6 +167,11 @@ public class TestingFileSystem extends DistributedFileSystem{
         @Override
         public boolean isDirectory(){
             return Files.isDirectory(p);
+        }
+
+        @Override
+        public boolean isEmptyDirectory() {
+            return isDirectory() && fileCount() == 0;
         }
 
         @Override

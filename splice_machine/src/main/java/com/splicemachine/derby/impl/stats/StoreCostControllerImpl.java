@@ -158,6 +158,7 @@ public class StoreCostControllerImpl implements StoreCostController {
                 tableStatistics = RegionLoadStatistics.getTableStatistics(tableId, partitions,fallbackNullFraction,extraQualifierMultiplier, defaultRowCount);
             else {
                 try {
+                    // todo(martinrupp): is this correct for ORC/Parquet? can we remove the expensive fileInfo.size() call?
                     FileInfo fileInfo = ImportUtils.getImportFileInfo(td.getLocation());
                     long rowCount = fileInfo !=null?fileInfo.size()/100:(long) VTICosting.defaultEstimatedRowCount;
                     long heapSize = fileInfo !=null?fileInfo.size():(long) VTICosting.defaultEstimatedRowCount*100;
