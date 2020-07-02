@@ -56,6 +56,7 @@ import com.splicemachine.db.iapi.reference.Module;
 import com.splicemachine.db.iapi.services.i18n.MessageService;
 import com.splicemachine.db.iapi.services.locks.CompatibilitySpace;
 import com.splicemachine.db.iapi.services.locks.LockOwner;
+import com.splicemachine.db.impl.jdbc.EmbedConnection;
 
 /**
  * UpdateLoader implements then functionality of
@@ -103,6 +104,7 @@ public final class UpdateLoader implements LockOwner {
 	private boolean needReload;
 	private JarReader jarReader;
 	private static volatile UpdateLoader instance = null;
+	private boolean isHBaseJVM = EmbedConnection.isHBaseJVM.get();
 
 	/**
 	 * Singleton factory method.
@@ -205,7 +207,6 @@ public final class UpdateLoader implements LockOwner {
 	Class loadClass(String className, boolean resolve) 
 		throws ClassNotFoundException {
 
-		boolean isRS = Thread.currentThread().getName().contains("DRDAConnThread");
 		JarLoader jl = null;
 
 		boolean unlockLoader = false;
@@ -214,7 +215,7 @@ public final class UpdateLoader implements LockOwner {
 
 			synchronized (this) {
 
-				if (needReload || !isRS) {
+				if (needReload || !isHBaseJVM) {
 					// Reload jars if this is executed by olap server or executor, because they are not
 					// aware of jar DDLs
 					reload();
