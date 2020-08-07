@@ -15,6 +15,7 @@
 
 package com.splicemachine.derby.stream.utils;
 
+import com.splicemachine.access.api.DistributedFileSystem;
 import com.splicemachine.access.api.FileInfo;
 import com.splicemachine.db.catalog.UUID;
 import com.splicemachine.db.iapi.error.StandardException;
@@ -30,12 +31,15 @@ import com.splicemachine.derby.jdbc.SpliceTransactionResourceImpl;
 import com.splicemachine.derby.stream.iapi.DataSetProcessor;
 import com.splicemachine.si.api.txn.Txn;
 import com.splicemachine.si.impl.driver.SIDriver;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -46,8 +50,8 @@ import java.util.Set;
  */
 public class ExternalTableUtils {
 
-    /*
-     check for Avro date type conversion. Databricks' spark-avro support does not handle date.
+    /**
+     * check for Avro date type conversion. Databricks' spark-avro support does not handle date.
      */
     public static StructType supportAvroDateType(StructType schema, String storedAs) {
         if (storedAs.toLowerCase().equals("a")) {
@@ -62,14 +66,17 @@ public class ExternalTableUtils {
         return schema;
     }
 
-    public static void supportAvroDateTypeColumns(ExecRow execRow) throws StandardException {
-        for(int i=0; i < execRow.size(); i++){
-            if (execRow.getColumn(i + 1).getTypeName().equals("DATE")) {
-                execRow.setColumn(i + 1, new SQLVarchar());
+    public static Dataset<Row> castDateTypeInAvroDataSet(Dataset<Row> dataset, StructType tableSchema) {
+        int i = 0;
+        for (StructField sf : tableSchema.fields()) {
+            if (sf.dataType().sameType(DataTypes.DateType)) {
+                String colName = dataset.schema().fields()[i].name();
+                dataset = dataset.withColumn(colName, dataset.col(colName).cast(DataTypes.DateType));
             }
+            i++;
         }
+        return dataset;
     }
-
 
     public static StructType getSchema(Activation activation, long conglomerateId) throws StandardException {
 
@@ -120,18 +127,48 @@ public class ExternalTableUtils {
         }
     }
 
+    public static String getSqlTypeName( org.apache.spark.sql.types.DataType datatype) {
+        if( datatype.toString().equals("StringType") ) {
+            // todo: stringlength?
+            return "CHAR/VARCHAR(x)";
+        }
+        else if( datatype.toString().equals("FloatType") ) {
+            // Spark's FloatType is NOT a SQL FLOAT type.
+            // what is meant is a 4-byte floating point value, which is a REAL in SQL.
+            // see https://doc.splicemachine.com/sqlref_datatypes_float.html .
+            return "REAL";
+        }
+        else return datatype.sql();
+    }
+    /// returns a suggested schema for this schema, e.g. `CREATE EXTERNAL TABLE T (a_float REAL, a_double DOUBLE);`
+    public static String getSuggestedSchema(StructType externalSchema) {
+        StringBuilder sb = new StringBuilder();
+        sb.append( "CREATE EXTERNAL TABLE T (" );
+        for( int i =0 ; i < externalSchema.fields().length; i++)
+        {
+            StructField f = externalSchema.fields()[i];
+            if( i > 0 ) sb.append( ", " );
+            sb.append( f.name() + " ");
+            sb.append( getSqlTypeName( f.dataType() ) );
+            if( !f.nullable() )
+                sb.append(" NOT NULL");
+        }
+        sb.append( ");" );
+        return sb.toString();
+    }
+
     public static void checkSchema(StructType tableSchema,
-                                   StructType dataSchema,
+                                   StructType externalSchema,
                                    int[] partitionColumnMap,
                                    String location) throws StandardException{
 
 
         StructField[] tableFields = tableSchema.fields();
-        StructField[] dataFields = dataSchema.fields();
+        StructField[] externalFields = externalSchema.fields();
 
-        if (tableFields.length != dataFields.length) {
+        if (tableFields.length != externalFields.length) {
             throw StandardException.newException(SQLState.INCONSISTENT_NUMBER_OF_ATTRIBUTE,
-                    tableFields.length, dataFields.length, location);
+                    tableFields.length, externalFields.length, location, getSuggestedSchema(externalSchema) );
         }
 
         StructField[] partitionedTableFields = new StructField[tableSchema.fields().length];
@@ -149,13 +186,12 @@ public class ExternalTableUtils {
         for (int i = 0; i < tableFields.length - partitionColumnMap.length; ++i) {
 
             String tableFiledTypeName = partitionedTableFields[i].dataType().typeName();
-            String dataFieldTypeName = dataFields[i].dataType().typeName();
+            String dataFieldTypeName = externalFields[i].dataType().typeName();
             if (!tableFiledTypeName.equals(dataFieldTypeName)){
                 throw StandardException.newException(SQLState.INCONSISTENT_DATATYPE_ATTRIBUTES,
-                        tableFields[i].name(),
-                        tableFields[i].dataType().toString(),
-                        dataFields[i].name(),
-                        dataFields[i].dataType().toString(),location);
+                        tableFields[i].name(), getSqlTypeName(tableFields[i].dataType()),
+                        externalFields[i].name(), getSqlTypeName(externalFields[i].dataType()),
+                        location, getSuggestedSchema(externalSchema) );
             }
         }
     }
@@ -261,14 +297,13 @@ public class ExternalTableUtils {
     }
 
     public static boolean isEmptyDirectory(String location) throws Exception {
-        String[] files = ImportUtils.getFileSystem(location).getExistingFiles(location, "*");
-        return ((files.length == 0) || (files.length == 1 && "_SUCCESS".equals(truncateFileNameFromFullPath(files[0]))));
-
+        DistributedFileSystem dfs = ImportUtils.getFileSystem(location);
+        return dfs.getInfo(location).isEmptyDirectory();
     }
 
     public static boolean isExisting(String location) throws Exception {
         FileInfo fileInfo = ImportUtils.getFileSystem(location).getInfo(location);
-        return  fileInfo.exists();
+        return fileInfo.exists();
 
     }
 

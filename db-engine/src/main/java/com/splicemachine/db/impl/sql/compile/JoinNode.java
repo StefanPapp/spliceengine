@@ -1315,7 +1315,7 @@ public class JoinNode extends TableOperatorNode{
 
     protected void oneRowRightSide(ActivationClassBuilder acb,MethodBuilder mb) throws StandardException{
         mb.push(rightResultSet.isOneRowResultSet());
-        mb.push(rightResultSet.isNotExists());  //join is for NOT EXISTS
+        mb.push(((FromTable)rightResultSet).getSemiJoinType());  //join is for inclusion or exclusion join
     }
 
     /**
@@ -2004,6 +2004,11 @@ public class JoinNode extends TableOperatorNode{
 
         // Is the right from SSQ
         mb.push(rightResultSet.getFromSSQ());
+
+        if (isCrossJoin()) {
+            mb.push(((Optimizable)rightResultSet).getTrulyTheBestAccessPath().getJoinStrategy().getBroadcastRight(rightResultSet.getFinalCostEstimate(true).getBase()));
+            numArgs++;
+        }
 
         // estimated row count
         mb.push(costEstimate.rowCount());
